@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 r"""번역 TSV 검사 (쓰는 순간 강제) — my files/tsv/yumimi_*.tsv 의 «번역» 칸
-  ⛔막음: 조각 수(¶ 로 나눈 수) ≠ 조각 열 · 가나·한자 남음 · 실제 탭/줄바꿈 · «+» 수가 3의 배수 아님(경칭 +A+B+) ·
+  ⛔막음: 조각 수(¶ 로 나눈 수) ≠ 조각 열 · 가나·한자 남음 · 실제 탭/줄바꿈 · «+»(경칭 옵션 뺌) ·
          가사 행의 «< > { }» 순서가 원문과 다름(카라오케 구간 수·자리)
   ⚠경고: 조각 머리에 «이름：» 화자 표시 · 빈 조각
   python tools/trcheck.py [파일…]
@@ -21,8 +21,8 @@ def check_row(c):
     m = JP.findall(tr)
     if m:
         err.append('가나·한자 남음 «%s»' % ''.join(m[:8]))
-    if tr.count('+') % 3:
-        err.append('«+» %d개 — 경칭은 +보이기+숨기기+ 꼴(3개)' % tr.count('+'))
+    if '+' in tr:                           # 2026-10-01 사용자: 경칭 옵션 뺌 → 한 벌만 번역
+        err.append('«+» 사용 — 경칭 옵션은 한국어판에서 뺐음(한 벌만 쓸 것)')
     if kind == '가사':
         sig = lambda s: ''.join(ch for ch in s if ch in '<>{}¶')
         if sig(tr) != sig(src):
