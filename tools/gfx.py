@@ -215,7 +215,7 @@ def _bg_bands(img, x0, x1, y0, y1, bands=(10, 11, 12, 13)):
             img.put(x, y, bands[k])
 
 
-def _blob_letter(ch, size, angle):
+def _blob_letter(ch, size, angle, blur=3.0, th=44):
     """둥근 굵은 글자 모양(제목 로고용): 나눔고딕 Bold 흐렸다가 낮은 문턱으로 잘라 «둥글게 부풀린» 1bit 마스크"""
     from PIL import Image as PI, ImageDraw, ImageFont, ImageFilter
     F = ImageFont.truetype(LOGO_FONT, size)
@@ -224,9 +224,9 @@ def _blob_letter(ch, size, angle):
     d = ImageDraw.Draw(g)
     l, t, r, b = d.textbbox((0, 0), ch, font=F)
     d.text(((g.width - (r - l)) // 2 - l, (g.height - (b - t)) // 2 - t), ch, font=F, fill=255)
-    g = g.filter(ImageFilter.GaussianBlur(3.0))
+    g = g.filter(ImageFilter.GaussianBlur(blur))
     g = g.rotate(angle, resample=PI.BICUBIC, expand=True)
-    return set((x, y) for y in range(g.height) for x in range(g.width) if g.getpixel((x, y)) > 44), g.width, g.height
+    return set((x, y) for y in range(g.height) for x in range(g.width) if g.getpixel((x, y)) > th), g.width, g.height
 
 
 def _disk(r):
@@ -447,7 +447,26 @@ def patch_minisnd(m):
     """퍼즐: 끝(THE END) · 예고 화면 글 — 로고(YUMIMI PUZZLE)는 사용자 판단 전이라 그대로"""
     m = bytearray(m)
     for n, o, N in PUZ:
-        if n == 'osimai':
+        if n == 'title':
+            img = _puz_dec(m, o, N)
+            cat = {(x, y): img.get(x, y) for y in range(82, 115) for x in range(146, 179)
+                   if img.get(x, y) and (x - 162) ** 2 + (y - 98) ** 2 <= 15 * 15}   # P 고리 안 고양이(노랑 고리째)
+            img.fill(100, 0, 220, 224, 0)
+            # «유미미 / 퍼즐» — 영문 로고 자리(오른쪽 반) 가운데 x 212, 방울은 두 줄 사이 가운데
+            for ch, col, cx, cy, ang, sz, bl, th in (('유', 6, 160, 46, 8, 60, 1.9, 70), ('미', 5, 214, 40, -5, 60, 1.9, 70),
+                                                     ('미', 3, 268, 46, 6, 60, 1.9, 70),
+                                                     ('퍼', 9, 182, 118, -6, 62, 1.8, 74), ('즐', 4, 246, 120, 4, 66, 1.4, 88)):
+                mk, w, h = _blob_letter(ch, sz, ang, bl, th)    # «즐» 은 획이 촘촘 → 크게·덜 부풀림
+                ox, oy = cx - w // 2, cy - h // 2
+                body = set((x + ox, y + oy) for x, y in mk)
+                dark = set((x + dx, y + dy) for x, y in body for dx, dy in _disk(2)) - body
+                for x, y in dark:
+                    img.put(x, y, 1)
+                for x, y in body:
+                    img.put(x, y, col)
+            for (x, y), v in cat.items():
+                img.put(x + 212 - 162, y + 80 - 98, v)
+        elif n == 'osimai':
             img = _puz_dec(m, o, N)
             img.fill(0, 0, 320, 80, 0)
             _ttf_draw(img, '끝', 104, 44, 40, 1, 5)
