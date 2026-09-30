@@ -1,0 +1,8 @@
+# 허용 목록: 소스·문서만(ROM·영문 패치 적용본·빌드 결과·my files·work 금지)
+*
+!.gitignore
+!README.md
+!tools/
+!tools/*.py
+!docs/
+!docs/*.md
