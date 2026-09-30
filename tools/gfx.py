@@ -5,7 +5,7 @@ r"""유미미 그림 글자 한글화 (2026-10-01) — 장면 그림(배경맵) 
   python tools/gfx.py            → work/gfx/<장면>_bg<n>.png 미리보기(영문 색으로 칠함)
   from gfx import build_all; build_all(disc) → {'/C000A.CUT': 새 파일 바이트, …}
 """
-import os, struct, sys
+import glob, os, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, r'C:\claude\project\anearth-kr-patch\tools')
@@ -539,6 +539,115 @@ def run_job(D, name, sub, fn, f=None):
     fn(bgs)
     s.rebuild([bytes(b.px) for b in bgs], objs)
     return sb + scene.rebuild_body(body, {sub: s}), bgs
+
+
+# ---------------- 선택지(장면 그림에 구운 글) ----------------
+CHOICE_FONT = 'Galmuri11'
+CH_X0, CH_Y0, CH_H, CH_MAXW = 16, 256, 16, 144       # 영문 ymm_scriptbuild: 왼쪽 2칸 커서 자리 · 한 줄 16px · 글 최대 18타일
+
+
+def choice_defs():
+    """script_choice.csv + 장면 스크립트 글(scenes/*/sceneN_script.txt) → {파일: [(선택지 번호, props, [칸 ID…], 부장면, subid)]}"""
+    import csv, re as _re
+    YT = os.path.join(ROOT, 'work', 'en', 'yumimiremixtools', 'yumimi')
+    props = {}; opts = {}
+    for r in csv.reader(open(os.path.join(YT, 'script', 'script_choice.csv'), encoding='utf-8')):
+        if not r or r[0] != 'string':
+            continue
+        m = _re.match(r'(.+?)-choice-(\d+)-(\w+)$', r[1])
+        f, k, j = m.group(1), int(m.group(2)), m.group(3)
+        if j == 'props':
+            p = dict(_re.findall(r'^#P\("(\w+)", "(\w+)"\)', r[2], _re.M))
+            props[(f, k)] = {a: int(b, 0) for a, b in p.items()}
+        else:
+            opts.setdefault((f, k), []).append(r[1])
+    subid = {}
+    for d in glob.glob(os.path.join(YT, 'scenes', '*')):
+        for sf in glob.glob(os.path.join(d, 'scene*_script.txt')):
+            n = int(_re.search(r'scene(\d+)_script', sf).group(1))
+            for m in _re.finditer(r'op02\s+\(0x0001 0x(\w+) =CHOICE(\d+)_X', open(sf, encoding='utf-8', errors='replace').read()):
+                subid[(os.path.basename(d), int(m.group(2)))] = (n, int(m.group(1), 16))
+    out = {}
+    for (f, k), p in sorted(props.items()):
+        n, sid = subid.get((f, k), (0, None))
+        out.setdefault(f, []).append((k, p, opts.get((f, k), []), n, sid))
+    return out
+
+
+def choice_texts():
+    """칸 ID(C021.DAT-choice-0-0) → 한국어(my files/tsv 선택지 행)"""
+    tr = {}
+    for f in glob.glob(os.path.join(ROOT, 'my files', 'tsv', 'yumimi_*.tsv')):
+        for ln in open(f, encoding='utf-8').read().split('\n')[1:]:
+            c = ln.split('\t')
+            if len(c) == 8 and c[2] == '선택지' and c[6].strip():
+                tr[c[0]] = c[6]
+    out = {}
+    for ln in open(os.path.join(ROOT, 'work', 'trans', 'ids.tsv'), encoding='utf-8').read().split('\n')[1:]:
+        c = ln.split('\t')
+        if len(c) >= 4 and c[0] in tr:
+            for loc in c[3:]:
+                if loc.startswith('choice:'):
+                    out[loc[7:]] = tr[c[0]]
+    return out
+
+
+def choice_all(D, repl, errs):
+    """선택지 장면마다: 배경맵(tilemapId+1)의 (16,256) 줄에 한국어를 그리고, 창 폭(op02 W)을 글 폭에 맞춤"""
+    import math
+    defs = choice_defs(); ko = choice_texts(); out = {}
+    for f, chs in defs.items():
+        name = '/' + f
+        data = repl.get(name) if name in repl else D.read(name)
+        sb, body = scene.split_subs(data)
+        kind, ents, end = scene.parse_body(body)
+        subs_new = {}
+        for k, p, cells, n, sid in chs:
+            if not cells or not all(c in ko for c in cells):
+                continue
+            s = subs_new.get(n) or scene.Sub().parse(body, ents[n][0])
+            if n not in subs_new:
+                s._bgs = [Img(s.bg_image(i)) for i in range(len(s.bg))]
+                s._objs = [bytes(s.obj_image(i)) for i in range(len(s.obj))]
+                s.script = bytearray(s.script)
+                subs_new[n] = s
+            img = s._bgs[p['tilemapId'] + 1]
+            img.fill(CH_X0, CH_Y0, CH_MAXW, CH_H * 4, 0xF)
+            maxw = 0
+            texts = [rules.squeeze(ko[c]) for c in cells]
+            fnt = CHOICE_FONT
+            if any(text_size(t, fnt)[0] - 2 > CH_MAXW for t in texts):
+                fnt = 'Galmuri11-Condensed'                # 한 줄이라도 넘치면 그 선택지 묶음 전체를 콘덴스드로(글 자체는 안 줄임)
+            for j, cid in enumerate(cells):
+                t = texts[j]
+                pts, _ = text_points(t, fnt)
+                xs = [a for a, _ in pts]; ys = [b for _, b in pts]
+                w = max(xs) + 1
+                if w > CH_MAXW:
+                    errs.append('%s 선택지 %d-%d 폭 %dpx > %d «%s»' % (f, k, j, w, CH_MAXW, t)); continue
+                maxw = max(maxw, w)
+                oy = CH_Y0 + CH_H * j + (CH_H - (max(ys) - min(ys) + 1)) // 2 - min(ys)
+                for a, b in pts:
+                    img.put(CH_X0 + a, oy + b, 0xE)
+            # 창 폭: autoW 면 글 폭(타일) + 커서 2 (최소 4+2)
+            if p.get('autoW'):
+                W = max(math.ceil(maxw / 8), 4) + 2
+                hits = [i for i in range(len(s.script) - 13) if s.script[i:i + 4] == bytes([0x80, 0x02, 0x00, 0x01])
+                        and (sid is None or struct.unpack_from('>H', s.script, i + 4)[0] == sid)
+                        and struct.unpack_from('>HH', s.script, i + 6) == (p['x'], p['y'])
+                        and struct.unpack_from('>H', s.script, i + 12)[0] == p['h']]
+                if len(hits) != 1:
+                    errs.append('%s 선택지 %d 창 명령(op02) 못 찾음/여럿 %s' % (f, k, hits)); continue
+                oldW = struct.unpack_from('>H', s.script, hits[0] + 10)[0]
+                if W > oldW:
+                    errs.append('⚠ %s 선택지 %d 창 폭 %d → %d 타일(x=%d)' % (f, k, oldW, W, p['x']))
+                struct.pack_into('>H', s.script, hits[0] + 10, W)
+        for n, s in subs_new.items():
+            s.script = bytes(s.script)
+            s.rebuild([bytes(b.px) for b in s._bgs], s._objs)
+        if subs_new:
+            out[name] = sb + scene.rebuild_body(body, subs_new)
+    return out
 
 
 def build_all(D, repl=None):

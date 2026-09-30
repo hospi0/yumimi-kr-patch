@@ -214,6 +214,10 @@ def main():
     exe, sym = hookk.patch_exe(D.read('/SATANIME.BIN'))
     repl['/SATANIME.BIN'] = gfx.patch_exe(exe)          # 일시정지 메뉴(경칭 줄 숨김)·인터페이스 줄
     repl.update(gfx.build_all(D, repl))                 # 장면 그림: 메인 메뉴·백업 안내 2·광고
+    cerr = []
+    repl.update(gfx.choice_all(D, repl, cerr))          # 선택지: 장면 그림에 한국어 + 창 폭(op02 W)
+    for e in cerr:
+        (stat['warn'] if e.startswith('⚠') else errs).append(e.lstrip('⚠ '))
     repl['/MINISND.ABK'] = gfx.patch_minisnd(D.read('/MINISND.ABK'))   # 퍼즐 끝·예고
     print('장면 %d · 문자열 %d · 글리프 %d · SATANIME +%d B (copyWrap %X · remap %X)'
           % (stat['scene'], stat['str'], stat['glyph'], len(exe) - (hookk.BASE - hookk.LOAD), sym['copyWrap'], sym['remap']))

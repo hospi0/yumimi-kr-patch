@@ -278,7 +278,7 @@ def rebuild_body(body, newsubs):
         if s is None:
             return body
         old = Sub().parse(body, 0)
-        main = s.sub1() + old.script
+        main = s.sub1() + s.script
         main += bytes((-len(main)) % 4)
         return main + body[old.end + ((-old.end) % 4):]
     starts = [e[0] for e in ents]
@@ -288,7 +288,7 @@ def rebuild_body(body, newsubs):
         pend = pcms[0] if pcms else nxt
         if i in newsubs:
             old = Sub().parse(body, st)
-            main = bytearray(newsubs[i].sub1() + old.script)
+            main = bytearray(newsubs[i].sub1() + newsubs[i].script)   # 선택지 창 폭 등 스크립트 수정 반영
             main += bytes((-len(main)) % 4)
             if pcms:
                 main += bytes((-len(main)) % 0x800)
