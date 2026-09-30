@@ -6,7 +6,7 @@ r"""유미미 믹스 리믹스 한글 빌드 (2026-10-01) — 영문 패치 적�
   ② 장면마다: SUBS 블록 스크립트의 문자열만 교체(명령 바이트 그대로) — tools/subs.py 가 1:1 검증.
      한국어 음절(글꼴 표에 없는 글자 전부)은 장면별 번호 i → 2바이트 A0+i/200, 1+i%200, 글리프(1bpp 28 B, 실행 중 테두리·그림자 생성)는 블록 뒤 → 적재 때 높은 RAM(GLY)으로 복사.
      블록 = 'SUBS'·전체 크기·소리 수·색인(+12 기준)·스크립트… (4 정렬 = 복사 크기) + 글리프 + (4 정렬) + [복사 크기]['HANG']
-  ③ SATANIME.BIN: tools/hookk.py (copyWrap·remap·폭·커닝)
+  ③ SATANIME.BIN: tools/hookk.py (copyWrap·remap·폭·커닝) + tools/gfx.py 그림(일시정지·인터페이스·장면 그림·퍼즐)
   ④ 트랙 1 전체 재배치(tools/iso.py) → work/out/Yumimi Mix Remix (Japan) (Track 1).bin
   ⛔쓰는 순간 막음: 블록 ≤0x3000 · 장면 글리프 ≤ GLY 버퍼 · 조각 수 · 문자열 0xBF B 초과 · 자리별 음절 칸 초과(아래 46 / 위 29) · 복사 크기 0x2000 초과 · 갈무리에 없는 글자
   ⚠경고: 원래 적재 창(0xF8000) 안이던 장면이 창을 넘음
@@ -16,7 +16,7 @@ import csv, glob, os, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, r'C:\claude\project\cyberdoll-kr-patch\tools')
-import disc, subs, kfont, hookk, iso, rules
+import disc, subs, kfont, hookk, iso, rules, gfx
 
 EN_BIN = os.path.join(ROOT, 'work', 'en', 'en_full.bin')
 N_TRACK1 = 134992                   # 영문 적용본 트랙 1 섹터 수
@@ -211,7 +211,9 @@ def main():
         if new:
             repl['/' + name] = new
     exe, sym = hookk.patch_exe(D.read('/SATANIME.BIN'))
-    repl['/SATANIME.BIN'] = exe
+    repl['/SATANIME.BIN'] = gfx.patch_exe(exe)          # 일시정지 메뉴(경칭 줄 숨김)·인터페이스 줄
+    repl.update(gfx.build_all(D, repl))                 # 장면 그림: 메인 메뉴·백업 안내 2·광고
+    repl['/MINISND.ABK'] = gfx.patch_minisnd(D.read('/MINISND.ABK'))   # 퍼즐 끝·예고
     print('장면 %d · 문자열 %d · 글리프 %d · SATANIME +%d B (copyWrap %X · remap %X)'
           % (stat['scene'], stat['str'], stat['glyph'], len(exe) - (hookk.BASE - hookk.LOAD), sym['copyWrap'], sym['remap']))
     for w in stat['warn']:
