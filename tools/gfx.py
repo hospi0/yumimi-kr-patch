@@ -184,6 +184,111 @@ JOBS = [
 ]
 
 
+LOGO_FONT = r'C:\claude\utils\font\logo\Gugi.ttf'
+
+
+def _bg_bands(img, x0, x1, y0, y1, bands=(10, 11, 12, 13)):
+    """배경 하늘 띠(색 10→11→12→13, 위에서 아래)를 글자 없이 다시 그림 — 띠 경계는 보이는 열에서 재고 가려진 열은 선형 보간"""
+    bounds = []
+    for a, b in zip(bands, bands[1:]):
+        known = {}
+        for x in range(x0, x1):
+            for y in range(y0, y1 - 1):
+                if img.get(x, y) == a and img.get(x, y + 1) == b:
+                    known[x] = y + 1; break
+        xs = sorted(known)
+        row = {}
+        for x in range(x0, x1):
+            if x in known:
+                row[x] = known[x]; continue
+            lo = max([k for k in xs if k < x], default=None); hi = min([k for k in xs if k > x], default=None)
+            if lo is None:
+                row[x] = known[hi]
+            elif hi is None:
+                row[x] = known[lo]
+            else:
+                row[x] = round(known[lo] + (known[hi] - known[lo]) * (x - lo) / (hi - lo))
+        bounds.append(row)
+    for x in range(x0, x1):
+        for y in range(y0, y1):
+            k = sum(1 for r in bounds if y >= r[x])
+            img.put(x, y, bands[k])
+
+
+def _blob_letter(ch, size, angle):
+    """둥근 굵은 글자 모양(제목 로고용): 구기(단선 둥근 획)를 흐렸다가 낮은 문턱으로 잘라 «둥글게 부풀린» 1bit 마스크"""
+    from PIL import Image as PI, ImageDraw, ImageFont, ImageFilter
+    F = ImageFont.truetype(LOGO_FONT, size)
+    pad = size // 3
+    g = PI.new('L', (size + pad * 2, size + pad * 2), 0)
+    d = ImageDraw.Draw(g)
+    l, t, r, b = d.textbbox((0, 0), ch, font=F)
+    d.text(((g.width - (r - l)) // 2 - l, (g.height - (b - t)) // 2 - t), ch, font=F, fill=255)
+    g = g.filter(ImageFilter.GaussianBlur(2.6))
+    g = g.rotate(angle, resample=PI.BICUBIC)
+    return set((x, y) for y in range(g.height) for x in range(g.width) if g.getpixel((x, y)) > 52), g.width, g.height
+
+
+def _disk(r):
+    return [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1) if dx * dx + dy * dy <= r * r + r]
+
+
+def job_title(bgs):
+    """OP_YUMI.DAT 부장면 0 bg0 오른쪽 반(320‥640 × 0‥224): 제목 로고 «유미미 믹스»(원본 ゆみみみ みっくす 처럼 글자마다 색)
+       + 저작권 줄 «©1992,1995 타케모토 이즈미/GAME ARTS»"""
+    b = bgs[0]
+    X0 = 320
+    cat = {(x, y): b.get(x, y) for y in range(70, 117) for x in range(462, 516)
+           if b.get(x, y) in (1, 7, 14, 15) and (x - 488) ** 2 + (y - 93) ** 2 <= 19 * 19}   # 동그라미 안·방울 색만(옆 글자 조각 빼기)
+    _bg_bands(b, X0, 640, 0, 224)
+    OL, EDGE = 1, 14
+    # (글자, 색, 가운데 x, 가운데 y, 크기, 기울기)
+    letters = [('유', 6, X0 + 88, 60, 74, 8), ('미', 4, X0 + 160, 54, 74, -5), ('미', 5, X0 + 232, 60, 74, 6),
+               ('믹', 7, X0 + 94, 128, 74, -6), ('스', 8, X0 + 228, 130, 74, 5)]
+    for ch, col, cx, cy, size, ang in letters:
+        m, w, h = _blob_letter(ch, size, ang)
+        ox, oy = cx - w // 2, cy - h // 2
+        body = set((x + ox, y + oy) for x, y in m)
+        dark = set()
+        for x, y in body:
+            for dx, dy in _disk(3):
+                dark.add((x + dx, y + dy)); dark.add((x + dx, y + dy + 3))     # 3px 테두리 + 아래로 3px 그림자
+        dark -= body
+        solid = body | dark
+        edge = set()
+        for x, y in solid:
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if (x + dx, y + dy) not in solid:
+                    edge.add((x + dx, y + dy))
+        for x, y in edge:
+            if X0 <= x < 640:
+                b.put(x, y, EDGE)
+        for x, y in dark:
+            if X0 <= x < 640:
+                b.put(x, y, OL)
+        for x, y in body:
+            if X0 <= x < 640:
+                b.put(x, y, col)
+    # 고양이 방울: 한가운데(둘째 줄 «믹» 과 «스» 사이) — 사용자 2026-10-01
+    dx, dy = (X0 + 161) - 488, 122 - 93
+    for (x, y), v in cat.items():
+        b.put(x + dx, y + dy, v)
+    # 저작권 줄: 몸 f(검정) · 오른쪽 아래 그림자 2
+    b.erase(X0, 176, 320, 40, (0xF, 2), 13)
+    pts, _ = text_points(rules.squeeze('©1992,1995 타케모토 이즈미/GAME ARTS'), 'Galmuri11-Bold')
+    xs = [a for a, _ in pts]; ys = [c for _, c in pts]
+    ox = X0 + (320 - (max(xs) - min(xs) + 1)) // 2 - min(xs); oy = 184 - min(ys)
+    body = set((a + ox, c + oy) for a, c in pts)
+    for a, c in body:
+        if (a + 1, c + 1) not in body:
+            b.put(a + 1, c + 1, 2)
+    for a, c in body:
+        b.put(a, c, 0xF)
+
+
+JOBS.append(('/OP_YUMI.DAT', 0, job_title))
+
+
 # ---------------- SATANIME 안 그림 ----------------
 LOAD = 0x06012000
 PAUSE_GFX = 0x0605883C + 0x4600      # fontBitmap 뒤: 경칭·자막·간판·장면넘기기·설명·ON·OFF·커서 (4bpp 가로줄 순)
@@ -392,7 +497,7 @@ def preview(D):
         f = D.read(name); sb, body = scene.split_subs(f); k_, ents, e_ = scene.parse_body(body)
         s = scene.Sub().parse(body, ents[sub][0])
         pal = {}
-        ref = {'/C000A.CUT': 'mainmenu_1', '/C000C.CUT': 'backup_format', '/C000B.CUT': 'backup_spacelow', '/C021.DAT': 'advertise'}.get(name)
+        ref = {'/C000A.CUT': 'mainmenu_1', '/C000C.CUT': 'backup_format', '/C000B.CUT': 'backup_spacelow', '/C021.DAT': 'advertise', '/OP_YUMI.DAT': None}.get(name)
         if ref:
             im = Image.open(os.path.join(ROOT, 'work', 'en', 'yumimiremixtools', 'yumimi', 'rsrc', ref + '.png')).convert('RGB')
             px = s.bg_image(1)
