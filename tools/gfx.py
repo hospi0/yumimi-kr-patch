@@ -184,7 +184,7 @@ JOBS = [
 ]
 
 
-LOGO_FONT = r'C:\claude\utils\font\logo\Gugi.ttf'
+LOGO_FONT = r'C:\claude\utils\font\nanum-gothic\NanumGothicBold.ttf'   # ⛔구기는 «유» 를 ㅇ+ㄱㅣ 로 그려 잘려 보임(사용자)
 
 
 def _bg_bands(img, x0, x1, y0, y1, bands=(10, 11, 12, 13)):
@@ -216,17 +216,17 @@ def _bg_bands(img, x0, x1, y0, y1, bands=(10, 11, 12, 13)):
 
 
 def _blob_letter(ch, size, angle):
-    """둥근 굵은 글자 모양(제목 로고용): 구기(단선 둥근 획)를 흐렸다가 낮은 문턱으로 잘라 «둥글게 부풀린» 1bit 마스크"""
+    """둥근 굵은 글자 모양(제목 로고용): 나눔고딕 Bold 흐렸다가 낮은 문턱으로 잘라 «둥글게 부풀린» 1bit 마스크"""
     from PIL import Image as PI, ImageDraw, ImageFont, ImageFilter
     F = ImageFont.truetype(LOGO_FONT, size)
-    pad = size // 3
+    pad = size // 2                                   # 여유 크게(돌리거나 부풀릴 때 모서리 잘림 방지)
     g = PI.new('L', (size + pad * 2, size + pad * 2), 0)
     d = ImageDraw.Draw(g)
     l, t, r, b = d.textbbox((0, 0), ch, font=F)
     d.text(((g.width - (r - l)) // 2 - l, (g.height - (b - t)) // 2 - t), ch, font=F, fill=255)
-    g = g.filter(ImageFilter.GaussianBlur(2.6))
-    g = g.rotate(angle, resample=PI.BICUBIC)
-    return set((x, y) for y in range(g.height) for x in range(g.width) if g.getpixel((x, y)) > 52), g.width, g.height
+    g = g.filter(ImageFilter.GaussianBlur(3.0))
+    g = g.rotate(angle, resample=PI.BICUBIC, expand=True)
+    return set((x, y) for y in range(g.height) for x in range(g.width) if g.getpixel((x, y)) > 44), g.width, g.height
 
 
 def _disk(r):
