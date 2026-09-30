@@ -25,7 +25,8 @@ WINDOW = 0xF8000
 POOL = {0: hookk.POOL_A[1], 1: hookk.POOL_B[1]}
 GLY_MAX = hookk.build()[1]['GLY_MAX']
 NORM = {'…': '...', '！': '!', '？': '?', '、': ',', '，': ',', '。': '.', '．': '.', '：': ':', '；': ';', '（': '(', '）': ')',
-        '　': ' ', '―': '―', '－': '-', '〜': '~', '～': '~'}
+        '　': ' ', '―': '―', '－': '-', '〜': '~', '～': '~', '─': '―', '━': '―', 'ー': '―'}
+NORM.update({chr(c): chr(c - 0xFEE0) for c in range(0xFF01, 0xFF5F) if chr(c) not in NORM})   # 전각 영숫자·부호 → 반각(영문 글꼴로)
 
 
 class Err(Exception):
