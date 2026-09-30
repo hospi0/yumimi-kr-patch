@@ -6,3 +6,12 @@
 !tools/*.py
 !docs/
 !docs/*.md
+!my files/
+!my files/tsv/
+!my files/tsv/yumimi_*.tsv
+!my files/yumimi_ko/
+!my files/yumimi_ko/*.tsv
+!work/
+!work/trans/
+!work/trans/songs.tsv
+!work/trans/fixes.tsv
