@@ -443,6 +443,35 @@ def _ttf_draw(img, text, cx, cy, size, fill, outline, ow=2):
         img.put(ox + x, oy + y, fill)
 
 
+def _hole_center(mask, w, h, left_half=False):
+    """글자 마스크의 막힌 구멍(바깥과 안 이어진 빈칸) 중 가장 큰 것의 중심 — left_half 면 왼쪽 반에 있는 것만(«퍼» 의 ㅍ)"""
+    seen = set(); stack = [(x, y) for x in range(w) for y in (0, h - 1)] + [(x, y) for y in range(h) for x in (0, w - 1)]
+    while stack:
+        p = stack.pop()
+        if p in seen or p in mask or not (0 <= p[0] < w and 0 <= p[1] < h):
+            continue
+        seen.add(p)
+        stack += [(p[0] + 1, p[1]), (p[0] - 1, p[1]), (p[0], p[1] + 1), (p[0], p[1] - 1)]
+    holes = []; done = set()
+    for y in range(h):
+        for x in range(w):
+            if (x, y) in mask or (x, y) in seen or (x, y) in done:
+                continue
+            comp = []; st = [(x, y)]
+            while st:
+                q = st.pop()
+                if q in done or q in mask or q in seen or not (0 <= q[0] < w and 0 <= q[1] < h):
+                    continue
+                done.add(q); comp.append(q)
+                st += [(q[0] + 1, q[1]), (q[0] - 1, q[1]), (q[0], q[1] + 1), (q[0], q[1] - 1)]
+            holes.append(comp)
+    if left_half:
+        xs = [x for x, y in mask]; mid = (min(xs) + max(xs)) / 2
+        holes = [c for c in holes if sum(x for x, _ in c) / len(c) < mid]
+    c = max(holes, key=len)
+    return round(sum(x for x, _ in c) / len(c)), round(sum(y for _, y in c) / len(c))
+
+
 def patch_minisnd(m):
     """퍼즐: 끝(THE END) · 예고 화면 글 — 로고(YUMIMI PUZZLE)는 사용자 판단 전이라 그대로"""
     m = bytearray(m)
@@ -452,10 +481,12 @@ def patch_minisnd(m):
             cat = {(x, y): img.get(x, y) for y in range(82, 115) for x in range(146, 179)
                    if img.get(x, y) and (x - 162) ** 2 + (y - 98) ** 2 <= 15 * 15}   # P 고리 안 고양이(노랑 고리째)
             img.fill(100, 0, 220, 224, 0)
-            # «유미미 / 퍼즐» — 영문 로고 자리(오른쪽 반) 가운데 x 212, 방울은 두 줄 사이 가운데
-            for ch, col, cx, cy, ang, sz, bl, th in (('유', 6, 160, 46, 8, 60, 1.9, 70), ('미', 5, 214, 40, -5, 60, 1.9, 70),
+            # «유미미 / 퍼즐» — 영문 로고 자리(오른쪽 반). 사용자(2026-10-01): «유» 빨강, «퍼» 는 방울과 같은 노랑,
+            #   고양이 방울은 원본 P 고리처럼 «퍼» 의 ㅍ 가운데(구멍 중심)에
+            cat_at = None
+            for ch, col, cx, cy, ang, sz, bl, th in (('유', 9, 160, 46, 8, 60, 1.9, 70), ('미', 5, 214, 40, -5, 60, 1.9, 70),
                                                      ('미', 3, 268, 46, 6, 60, 1.9, 70),
-                                                     ('퍼', 9, 182, 118, -6, 62, 1.8, 74), ('즐', 4, 246, 120, 4, 66, 1.4, 88)):
+                                                     ('퍼', 6, 180, 118, -4, 78, 1.8, 74), ('즐', 4, 256, 120, 4, 66, 1.4, 88)):
                 mk, w, h = _blob_letter(ch, sz, ang, bl, th)    # «즐» 은 획이 촘촘 → 크게·덜 부풀림
                 ox, oy = cx - w // 2, cy - h // 2
                 body = set((x + ox, y + oy) for x, y in mk)
@@ -464,8 +495,11 @@ def patch_minisnd(m):
                     img.put(x, y, 1)
                 for x, y in body:
                     img.put(x, y, col)
+                if ch == '퍼':
+                    cat_at = _hole_center(mk, w, h, left_half=True)
+                    cat_at = (cat_at[0] + ox, cat_at[1] + oy)
             for (x, y), v in cat.items():
-                img.put(x + 212 - 162, y + 80 - 98, v)
+                img.put(x + cat_at[0] - 162, y + cat_at[1] - 98, v)
         elif n == 'osimai':
             img = _puz_dec(m, o, N)
             img.fill(0, 0, 320, 80, 0)
