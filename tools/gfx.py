@@ -498,8 +498,16 @@ def patch_minisnd(m):
                 if ch == '퍼':
                     cat_at = _hole_center(mk, w, h, left_half=True)
                     cat_at = (cat_at[0] + ox, cat_at[1] + oy)
+            # 영문 P 고리의 검은 테두리·음영 원호는 빼고(사용자) 노란 원판 위에 토끼 얼굴(반지름 10 안)만
+            for dx, dy in _disk(14):
+                img.put(cat_at[0] + dx, cat_at[1] + dy, 6)
+            for dx, dy in _disk(22):                       # ㅍ 안쪽 구멍 테두리 찌꺼기(바깥 투명에 안 닿는 검정) → 노랑
+                x, y = cat_at[0] + dx, cat_at[1] + dy
+                if img.get(x, y) == 1 and all(img.get(x + a, y + b) for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                    img.put(x, y, 6)
             for (x, y), v in cat.items():
-                img.put(x + cat_at[0] - 162, y + cat_at[1] - 98, v)
+                if (x - 162) ** 2 + (y - 98) ** 2 <= 10 * 10:
+                    img.put(x + cat_at[0] - 162, y + cat_at[1] - 98, v)
         elif n == 'osimai':
             img = _puz_dec(m, o, N)
             img.fill(0, 0, 320, 80, 0)
