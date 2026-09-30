@@ -57,6 +57,39 @@ def pack2(g):
     return bytes(out)
 
 
+def pack1(g):
+    """몸(3)만 1bpp: 14줄 × u16 BE(비트15 = 왼쪽) = 28 B — 테두리·그림자는 실행 중에 만든다(expand1)"""
+    out = bytearray()
+    for row in g:
+        v = 0
+        for x in range(CW):
+            if row[x] == 3:
+                v |= 0x8000 >> x
+        out += v.to_bytes(2, 'big')
+    return bytes(out)
+
+
+def expand1(b1):
+    """SH-2 expand1 과 같은 비트 계산 → 4bpp 112 B (검산용)"""
+    B = [int.from_bytes(b1[y * 2:y * 2 + 2], 'big') for y in range(CH)]
+    out = bytearray(); prev_solid = 0
+    for y in range(CH):
+        u = B[y - 1] if y else 0; d = B[y + 1] if y + 1 < CH else 0; b = B[y]
+        m = b | u | d
+        dil = (m | (m << 1) | (m >> 1)) & 0xFFFF
+        o = dil & ~b & 0xFFFF
+        solid = b | o
+        sh = (prev_solid >> 1) & ~solid & 0xFFFF
+        prev_solid = solid
+        for x in range(0, CW, 2):
+            v = []
+            for xx in (x, x + 1):
+                bit = 0x8000 >> xx
+                v.append(0xF if b & bit else 1 if o & bit else 2 if sh & bit else 0)
+            out.append(v[0] << 4 | v[1])
+    return bytes(out)
+
+
 MAP = (0, 1, 2, 0xF)
 
 

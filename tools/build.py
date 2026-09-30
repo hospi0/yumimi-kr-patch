@@ -4,11 +4,11 @@ r"""유미미 믹스 리믹스 한글 빌드 (2026-10-01) — 영문 패치 적�
      ids.tsv 로 칸 ID(scene:C101C2.DAT-ss0-4) 를 찾고, 영어 칸 조각 순서대로 «<» 든 조각 = 가사 행, 나머지 = 대사/노래 행.
      번역 없는 칸·조각은 영문 그대로.
   ② 장면마다: SUBS 블록 스크립트의 문자열만 교체(명령 바이트 그대로) — tools/subs.py 가 1:1 검증.
-     한국어 음절(글꼴 표에 없는 글자 전부)은 장면별 번호 i → 2바이트 A0+i/200, 1+i%200, 글리프(2bpp 56 B)는 블록 뒤.
+     한국어 음절(글꼴 표에 없는 글자 전부)은 장면별 번호 i → 2바이트 A0+i/200, 1+i%200, 글리프(1bpp 28 B, 실행 중 테두리·그림자 생성)는 블록 뒤 → 적재 때 높은 RAM(GLY)으로 복사.
      블록 = 'SUBS'·전체 크기·소리 수·색인(+12 기준)·스크립트… (4 정렬 = 복사 크기) + 글리프 + (4 정렬) + [복사 크기]['HANG']
   ③ SATANIME.BIN: tools/hookk.py (copyWrap·remap·폭·커닝)
   ④ 트랙 1 전체 재배치(tools/iso.py) → work/out/Yumimi Mix Remix (Japan) (Track 1).bin
-  ⛔쓰는 순간 막음: 조각 수 · 문자열 0xBF B 초과 · 자리별 음절 칸 초과(아래 46 / 위 29) · 복사 크기 0x2000 초과 · 갈무리에 없는 글자
+  ⛔쓰는 순간 막음: 블록 ≤0x3000 · 장면 글리프 ≤ GLY 버퍼 · 조각 수 · 문자열 0xBF B 초과 · 자리별 음절 칸 초과(아래 46 / 위 29) · 복사 크기 0x2000 초과 · 갈무리에 없는 글자
   ⚠경고: 원래 적재 창(0xF8000) 안이던 장면이 창을 넘음
   python tools/build.py [--write]
 """
@@ -23,6 +23,7 @@ N_TRACK1 = 134992                   # 영문 적용본 트랙 1 섹터 수
 OUT = os.path.join(ROOT, 'work', 'out', 'Yumimi Mix Remix (Japan) (Track 1).bin')
 WINDOW = 0xF8000
 POOL = {0: hookk.POOL_A[1], 1: hookk.POOL_B[1]}
+GLY_MAX = hookk.build()[1]['GLY_MAX']
 NORM = {'…': '...', '！': '!', '？': '?', '、': ',', '，': ',', '。': '.', '．': '.', '：': ':', '；': ';', '（': '(', '）': ')',
         '　': ' ', '―': '―', '－': '-', '〜': '~', '～': '~'}
 
@@ -80,7 +81,7 @@ class Enc:
             i = len(self.glyphs)
             if i >= 64 * 200:
                 raise Err('장면 음절 너무 많음')
-            self.glyphs.append(kfont.pack2(kfont.cell(ch)))
+            self.glyphs.append(kfont.pack1(kfont.cell(ch)))
             self.gid[ch] = i
         i = self.gid[ch]
         return bytes([0xA0 + i // 200, 1 + i % 200])
@@ -171,11 +172,16 @@ def build_scene(name, b, ids, cells, pieces, table, errs, stat):
         errs.append('%s 복사 크기 0x%X > 0x2000' % (name, copy))
     for g in enc.glyphs:
         blk += g
-    blk += bytes((-len(blk)) % 4)
+    blk += bytes((-len(blk)) % 4 or 4)          # 글리프 부분 최소 4 B(copyWrap 의 memcpy 크기 0 방지)
+    gbytes = len(blk) - copy
+    if gbytes > GLY_MAX:
+        errs.append('%s 글리프 %d개 = %d B > %d B(높은 RAM 버퍼)' % (name, len(enc.glyphs), gbytes, GLY_MAX))
     blk += struct.pack('>I', copy) + b'HANG'
     if len(blk) & 0xFFFF == 0:              # subtitleBlockExists 는 크기 하위 16비트(0이면 «없음»)
         blk[-8:-8] = bytes(4)
     struct.pack_into('>I', blk, 4, len(blk))
+    if len(blk) > hookk.BLOCK_MAX:
+        errs.append('%s SUBS 블록 0x%X > 0x%X(음성 분할 읽기 여분 섹터)' % (name, len(blk), hookk.BLOCK_MAX))
     new = bytes(blk) + b[size:]
     stat['scene'] += 1; stat['glyph'] += len(enc.glyphs)
     if len(b) <= WINDOW < len(new):
