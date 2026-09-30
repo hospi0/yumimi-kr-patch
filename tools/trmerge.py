@@ -140,6 +140,11 @@ def main():
         c = ln.split('\t')
         if len(c) >= 2 and c[1].strip():
             out[c[0]] = c[1]; stat['song'] = stat.get('song', 0) + 1
+    # 사용자 확인을 거친 행 단위 수정(용어·말투) — work/trans/fixes.tsv 가 마지막
+    for ln in open(os.path.join(ROOT, 'work', 'trans', 'fixes.tsv'), encoding='utf-8').read().split('\n')[1:]:
+        c = ln.split('\t')
+        if len(c) >= 2 and c[1].strip():
+            out[c[0]] = c[1]; stat['fix'] = stat.get('fix', 0) + 1
     open(os.path.join(ROOT, 'work', 'trans', 'merge_preview.tsv'), 'w', encoding='utf-8', newline='\n').write(''.join(prev))
     print('받은 번역 %d행 · %s · 미리보기 work/trans/merge_preview.tsv (%d행)' % (len(given), stat, len(prev) - 1))
     if apply_:
