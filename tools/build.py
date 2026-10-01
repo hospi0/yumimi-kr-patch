@@ -189,6 +189,12 @@ def main():
     table = subs.load_table(); cells = subs.csv_cells(); reg = subs.regions()
     tr = load_tr()
     pieces, errs = cell_pieces(tr)
+    import trcheck                                      # ★번역 검사(이름 표기 통일 포함)를 빌드가 먼저 — 걸리면 빌드 중단
+    for f in sorted(glob.glob(os.path.join(ROOT, 'my files', 'tsv', 'yumimi_*.tsv'))):
+        for l in open(f, encoding='utf-8').read().split('\n')[1:]:
+            c = l.split('\t')
+            if len(c) == 8:
+                errs += ['%s %s' % (c[0], e) for e in trcheck.check_row(c)[0]]
     print('규칙: 조각 수 · 문자열 ≤0xBF B · 아래 자리 음절 ≤%d · 위 ≤%d · 블록 복사부 ≤0x2000 · 부호 뒤 공백 삭제' % (POOL[0], POOL[1]))
     print('번역 행 %d · 번역 든 칸 %d' % (len(tr), len(pieces)))
     D = disc.Disc(EN_BIN)

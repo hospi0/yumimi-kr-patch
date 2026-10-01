@@ -145,6 +145,13 @@ def main():
         c = ln.split('\t')
         if len(c) >= 2 and c[1].strip():
             out[c[0]] = c[1]; stat['fix'] = stat.get('fix', 0) + 1
+    # 인물 이름 표기 통일(거센소리 — trcheck.BAD: «마쓰자키»→«마츠자키» 등, 2026-10-01 사용자 «빌드할 때 통일하는 게 규칙»)
+    import trcheck
+    for iid, t in list(out.items()):
+        for v, nm in trcheck.BAD.items():
+            if v in t:
+                t = t.replace(v, nm); stat['name'] = stat.get('name', 0) + 1
+        out[iid] = t
     open(os.path.join(ROOT, 'work', 'trans', 'merge_preview.tsv'), 'w', encoding='utf-8', newline='\n').write(''.join(prev))
     print('받은 번역 %d행 · %s · 미리보기 work/trans/merge_preview.tsv (%d행)' % (len(given), stat, len(prev) - 1))
     if apply_:
