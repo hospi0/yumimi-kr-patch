@@ -31,7 +31,8 @@ FONT_VRAM = 0x25C1A800              # 비캐시 VDP1 0x1A800
 WIDTH = 0x0606203C                  # 폭 표 160 B
 KERN = 0x060620DC                   # 커닝 160×160
 PCM_CNT = 0x0601AD6A                # ADD #1,R5 (7501)
-PCM_EXTRA = 6
+PCM_EXTRA = 6                       # 블록 최대 = 6섹터(장면마다 실제로 더 읽는 수는 pcmExtra 가 ceil(크기/0x800))
+LIT_RET = 0x0605DB8C                # 영문 적재 함수의 «0x0601256C 로 복귀» 리터럴
 BLOCK_MAX = PCM_EXTRA * 0x800
 POOL_A = (0x51, 46)
 POOL_B = (0x7F, 29)
@@ -74,6 +75,19 @@ def emit(a, EXPD):
     a.defl('MEMCPY', MEMCPY); a.defl('WW', WORDWRAP); a.defl('HANG', 0x48414E47)
     a.defl('GB', GB); a.defl('SCR', SCR); a.defl('GLY', GLY); a.defl('BUFA', BUF_A)
     a.defl('VRAM', FONT_VRAM); a.defl('FONT', FONT_RAM); a.defw('K200', 200)
+
+    # ---- ⓪ pcmExtra — 영문 적재 함수 끝의 «0x0601256C 로 복귀» 리터럴(0x0605DB8C)을 이것으로.
+    #   r11 = 0x00200004 + SUBS 크기(영문 코드가 방금 맞춰 둔 값) → 음성 분할 읽기 섹터 수 «ADD #imm,R5»(0x0601AD6A)의
+    #   imm 을 1 + ceil(SUBS 크기/0x800) 로 고쳐 쓴다(자기 수정 코드 — SH-2 캐시는 명령·데이터 공용이라 같은 CPU 에서 일관).
+    #   ★2026-10-01 실기: 모든 장면에 +6 을 고정했더니 C104 에서 소리 대기(0x0601B1A4)로 멈춤 → 장면마다 꼭 필요한 만큼만.
+    a.defl('B200004', 0x00200004); a.defl('ADDIMM', PCM_CNT + 1); a.defl('RET256C', 0x0601256C); a.defl('K7FF', 0x7FF)
+    a.label('pcmExtra')
+    a.mov('r11', 'r1'); a.movl_pc('B200004', 'r2'); a.sub('r2', 'r1')      # r1 = SUBS 크기(없으면 0)
+    a.movl_pc('K7FF', 'r0'); a.add('r1', 'r0')
+    a.shlr8('r0'); a.shlr2('r0'); a.shlr('r0')                             # ceil(크기/0x800)
+    a.addi(1, 'r0')
+    a.movl_pc('ADDIMM', 'r1'); a.movb_store('r0', 'r1')
+    a.movl_pc('RET256C', 'r0'); a.jmp('r0'); a.nop()
 
     # ---- ① copyWrap
     a.label('copyWrap')
@@ -215,7 +229,7 @@ def build():
     blob = bytearray(code) + bytes((-len(code)) % 4)
     assert BASE + len(blob) == EXPD['SCR']
     blob += bytes(128 + 4)
-    sym = {'copyWrap': a.labels['copyWrap'], 'remap': a.labels['remap'], 'expand1': a.labels['expand1'],
+    sym = {'pcmExtra': a.labels['pcmExtra'], 'copyWrap': a.labels['copyWrap'], 'remap': a.labels['remap'], 'expand1': a.labels['expand1'],
            'GB': EXPD['GB'], 'GLY': EXPD['GLY'], 'GLY_MAX': RAM_END - EXPD['GLY'], 'end': BASE + len(blob)}
     return bytes(blob), sym
 
@@ -230,7 +244,8 @@ def patch_exe(exe):
     exe += blob
     struct.pack_into('>I', exe, LIT_MEMCPY - LOAD, sym['copyWrap'])
     struct.pack_into('>I', exe, LIT_WW - LOAD, sym['remap'])
-    exe[PCM_CNT - LOAD + 1] = 1 + PCM_EXTRA
+    assert u32(LIT_RET) == 0x0601256C
+    struct.pack_into('>I', exe, LIT_RET - LOAD, sym['pcmExtra'])    # 섹터 수는 장면마다 pcmExtra 가 실행 중에 고침
     for c in CACHE:
         exe[WIDTH - LOAD + c] = kfont.ADV
         for q in range(160):

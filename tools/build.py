@@ -219,7 +219,7 @@ def main():
     for e in cerr:
         (stat['warn'] if e.startswith('⚠') else errs).append(e.lstrip('⚠ '))
     repl['/MINISND.ABK'] = gfx.patch_minisnd(D.read('/MINISND.ABK'))   # 퍼즐 끝·예고
-    # ★음성 분할 읽기를 6섹터 더 읽게 했으므로(hookk.PCM_EXTRA) 모든 장면 파일 끝에 같은 만큼 0 을 붙인다 —
+    # ★음성 분할 읽기는 장면마다 ceil(SUBS/0x800) 섹터 더 읽으므로(hookk.pcmExtra, 최대 PCM_EXTRA) 모든 장면 파일 끝에 그만큼 0 을 붙인다 —
     #   안 붙이면 마지막 음성을 읽을 때 파일 끝 너머를 읽으려다 멈춤(2026-10-01 실기: C104 소리 대기 0x0601B1A4 에서 정지)
     pad = bytes(hookk.PCM_EXTRA * 0x800)
     for nm, l, s in D.files():
