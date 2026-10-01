@@ -1,7 +1,7 @@
 # 유미미 믹스 리믹스 (세가 새턴 일본판) 한글 패치
 
 **최신 v0.9** — 내려받기는 [Releases](../../releases) 의 `YumimiMixRemix_KR_v0.9.zip`.
-일본판 Redump 4트랙 중 **트랙 1** 에 적용합니다(원본md5 `B26C2987…` → 패치md5 `81E815FA…`). 영문 패치를 먼저 적용하지 마세요.
+일본판 Redump 4트랙 중 **트랙 1** 에 적용합니다(원본md5 `B26C2987…` → 패치md5 `E0BA2166…`). 영문 패치를 먼저 적용하지 마세요.
 
 ## 만든 방법
 - Supper 의 영문 패치([yumimiremixtools](https://github.com/suppertails66/yumimiremixtools), GPLv3)가 새로 만든 **게임 안 자막 기능**을 한글로 바꿨습니다.

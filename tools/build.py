@@ -219,6 +219,12 @@ def main():
     for e in cerr:
         (stat['warn'] if e.startswith('⚠') else errs).append(e.lstrip('⚠ '))
     repl['/MINISND.ABK'] = gfx.patch_minisnd(D.read('/MINISND.ABK'))   # 퍼즐 끝·예고
+    # ★음성 분할 읽기를 6섹터 더 읽게 했으므로(hookk.PCM_EXTRA) 모든 장면 파일 끝에 같은 만큼 0 을 붙인다 —
+    #   안 붙이면 마지막 음성을 읽을 때 파일 끝 너머를 읽으려다 멈춤(2026-10-01 실기: C104 소리 대기 0x0601B1A4 에서 정지)
+    pad = bytes(hookk.PCM_EXTRA * 0x800)
+    for nm, l, s in D.files():
+        if nm.endswith(('.DAT', '.CUT')):
+            repl[nm] = (repl[nm] if nm in repl else D.read(nm)) + pad
     print('장면 %d · 문자열 %d · 글리프 %d · SATANIME +%d B (copyWrap %X · remap %X)'
           % (stat['scene'], stat['str'], stat['glyph'], len(exe) - (hookk.BASE - hookk.LOAD), sym['copyWrap'], sym['remap']))
     for w in stat['warn']:
