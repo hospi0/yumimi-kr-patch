@@ -6,8 +6,8 @@ r"""유미미 한글 자막 SH-2 코드 (2026-10-01, 2판) — 영문 패치 적
        ★1판은 글리프를 Low RAM(0x200000 영역)에서 바로 읽었는데, 큰 장면은 음성을 0x200000 에 다시 읽어 들여 글리프가 덮임
          (2026-10-01 실기: C102 에서 글자 깨짐) → 높은 RAM 으로 복사.
   ② remap     — assignRenderBufString 의 wordWrapString 호출 리터럴 0x06068AA4 를 이것으로.
-       준비 버퍼를 제자리에서 2바이트 음절(A0+i/200, 1+i%200) → 1바이트 캐시 코드로. 새 칸마다 글리프(1bpp 28 B)를
-       expand1 로 4bpp(몸 F·8방향 테두리 1·(+1,+1) 그림자 2)로 펼쳐 VDP1 글꼴 칸과 RAM 글꼴 원본 둘 다에 쓴다.
+       준비 버퍼를 제자리에서 2바이트 음절(A0+i/200, 1+i%200) → 1바이트 캐시 코드로. 새 칸마다 글리프(2bpp 56 B)를
+       표 조회로 4bpp 로 펼쳐(2bpp: 0 투명·1 테두리·2 그림자·3→F) VDP1 글꼴 칸과 RAM 글꼴 원본 둘 다에 쓴다.
        캐시 칸: 아래 자리 0x51‥0x7E(46) · 위 자리 0x7F‥0x9B(29). 넘치면 마지막 칸 재사용(빌더가 막음). MACL 보존.
   ③ 음성 분할 읽기 섹터 수(0x0601AD6A «ADD #1,R5» → «ADD #7,R5»): 엔진은 색인 오프셋으로 섹터를 세는데 실제 데이터는
        SUBS 블록 크기만큼 뒤에 있어 꼬리가 덜 읽힌다(영문은 블록 < 0x800 이라 괜찮았음) → 6섹터(12 KB) 더 읽음. 블록 ≤ 0x3000.
@@ -73,7 +73,7 @@ class A(sh2asm.Asm):
 def emit(a, EXPD):
     GB, SCR, GLY = EXPD['GB'], EXPD['SCR'], EXPD['GLY']
     a.defl('MEMCPY', MEMCPY); a.defl('WW', WORDWRAP); a.defl('HANG', 0x48414E47)
-    a.defl('GB', GB); a.defl('SCR', SCR); a.defl('GLY', GLY); a.defl('BUFA', BUF_A)
+    a.defl('GB', GB); a.defl('SCR', SCR); a.defl('GLY', GLY); a.defl('BUFA', BUF_A); a.defl('EXP', EXPD['EXP'])
     a.defl('VRAM', FONT_VRAM); a.defl('FONT', FONT_RAM); a.defw('K200', 200)
 
     # ---- ⓪ pcmExtra — 영문 적재 함수 끝의 «0x0601256C 로 복귀» 리터럴(0x0605DB8C)을 이것으로.
@@ -138,14 +138,17 @@ def emit(a, EXPD):
     a.cmphs('r11', 'r10'); a.bt('rm_full')
     a.mov('r10', 'r0'); a.shll('r0'); a.movw_r0n_store('r2', 'r3')
     a.mov('r10', 'r1'); a.addi(1, 'r10')
-    # 글리프: src = GB + r2×28 · off = (r12+r1)×0x70
-    a.movi(28, 'r0'); a.muluw('r0', 'r2'); a.sts_macl('r4'); a.add('r13', 'r4')
+    # 글리프: src = GB + r2×56(2bpp) · off = (r12+r1)×0x70 — 표(512 B)로 바이트마다 4bpp 2바이트
+    #   ★1bpp + 실행 중 테두리 계산(expand1)은 수직귀선 인터럽트 안에서 너무 오래 걸려 소리 처리를 놓침(C104 멈춤 3회, 2026-10-01)
+    a.movi(56, 'r0'); a.muluw('r0', 'r2'); a.sts_macl('r4'); a.add('r13', 'r4')
     a.mov('r12', 'r0'); a.add('r1', 'r0'); a.movi(0x70, 'r5'); a.muluw('r5', 'r0'); a.sts_macl('r5')
     a.movl_pc('VRAM', 'r6'); a.add('r5', 'r6')
     a.movl_pc('FONT', 'r7'); a.add('r5', 'r7')
-    a.push('r1')
-    a.bsr('expand1'); a.nop()
-    a.pop('r1')
+    a.movl_pc('EXP', 'r5'); a.movi(56, 'r3')
+    a.label('rm_up')
+    a.movb_postinc('r4', 'r0'); a.extub('r0', 'r0'); a.shll('r0'); a.movw_r0m('r5', 'r0')
+    a.movw_store('r0', 'r6'); a.addi(2, 'r6'); a.movw_store('r0', 'r7'); a.addi(2, 'r7')
+    a.dt('r3'); a.bf('rm_up')
     a.label('rm_found')
     a.mov('r12', 'r0'); a.add('r1', 'r0'); a.movb_store('r0', 'r9'); a.addi(1, 'r9')
     a.bra('rm_loop'); a.nop()
@@ -161,56 +164,6 @@ def emit(a, EXPD):
     a.ldsmacl_pop(); a.ldspr_postinc('r15')
     a.movl_pc('WW', 'r0'); a.jmp('r0'); a.nop()
 
-    # ---- expand1: r4 = 1bpp 28 B · r6 = VRAM · r7 = RAM 글꼴 → 4bpp 112 B 둘 다에
-    #   줄마다 B(몸) · O = 8방향 넓힘 & ~B · S = (윗줄 solid >> 1) & ~solid, 픽셀 우선 F > 1 > 2
-    a.label('expand1')
-    a.stspr_predec('r15')                           # 안에서 rd16 을 bsr 로 부르므로 PR 보존
-    for r in ('r8', 'r9', 'r10', 'r11', 'r12', 'r13'):
-        a.push(r)
-    a.movi(0, 'r9'); a.movi(0, 'r12')                # r9 = 윗줄 B · r12 = 윗줄 solid
-    a.bsr('rd16'); a.nop(); a.mov('r0', 'r10')       # r10 = 이 줄
-    a.bsr('rd16'); a.nop(); a.mov('r0', 'r11')       # r11 = 아랫줄
-    a.movi(14, 'r8')
-    a.label('ex_row')
-    a.mov('r9', 'r0'); a.orr('r10', 'r0'); a.orr('r11', 'r0')
-    a.mov('r0', 'r1'); a.shll('r1'); a.mov('r0', 'r2'); a.shlr('r2'); a.orr('r1', 'r0'); a.orr('r2', 'r0')
-    a.extuw('r0', 'r0')
-    a.notr('r10', 'r1'); a.andr('r1', 'r0'); a.mov('r0', 'r13')          # r13 = O
-    a.mov('r10', 'r3'); a.orr('r13', 'r3')                                # r3 = solid
-    a.mov('r12', 'r2'); a.shlr('r2'); a.notr('r3', 'r1'); a.andr('r1', 'r2')   # r2 = S
-    a.mov('r3', 'r12')
-    a.mov('r10', 'r5'); a.shll16('r5'); a.shll16('r13'); a.shll16('r2')
-    a.movi(8, 'r3')
-    a.label('ex_px')
-    for sh_, dst in ((True, 'hi'), (False, 'lo')):
-        lab = 'ex_%s' % dst
-        a.movi(0, 'r0')
-        a.shll('r2'); a.bf(lab + '1'); a.movi(2, 'r0'); a.label(lab + '1')
-        a.shll('r13'); a.bf(lab + '2'); a.movi(1, 'r0'); a.label(lab + '2')
-        a.shll('r5'); a.bf(lab + '3'); a.movi(15, 'r0'); a.label(lab + '3')
-        if dst == 'hi':
-            a.shll2('r0'); a.shll2('r0'); a.mov('r0', 'r1')
-        else:
-            a.orr('r1', 'r0')
-    a.movb_store('r0', 'r6'); a.addi(1, 'r6'); a.movb_store('r0', 'r7'); a.addi(1, 'r7')
-    a.dt('r3'); a.bf('ex_px')
-    # 다음 줄
-    a.mov('r10', 'r9'); a.mov('r11', 'r10')
-    a.movi(0, 'r11')
-    a.movi(2, 'r0'); a.cmphs('r0', 'r8'); a.bf('ex_nord')                 # r8 ≥ 2 → 남은 줄 있음(r8 = 이번 줄 포함 남은 수)
-    a.movi(3, 'r0'); a.cmphs('r0', 'r8'); a.bf('ex_nord')
-    a.bsr('rd16'); a.nop(); a.mov('r0', 'r11')
-    a.label('ex_nord')
-    a.dt('r8'); a.bf('ex_row')
-    for r in ('r13', 'r12', 'r11', 'r10', 'r9', 'r8'):
-        a.pop(r)
-    a.ldspr_postinc('r15')
-    a.rts(); a.nop()
-    # rd16: r4 에서 u16 BE 읽기 → r0 (r1 씀)
-    a.label('rd16')
-    a.movb_postinc('r4', 'r0'); a.extub('r0', 'r0'); a.shll8('r0')
-    a.movb_postinc('r4', 'r1'); a.extub('r1', 'r1'); a.orr('r1', 'r0')
-    a.rts(); a.nop()
 
 
 def build():
@@ -218,6 +171,7 @@ def build():
     for _ in range(3):
         EXPD = {}
         SCR = BASE + ((code_len + 3) & ~3)
+        EXPD['EXP'] = SCR; SCR += 512
         EXPD['SCR'] = SCR; EXPD['GB'] = SCR + 128; EXPD['GLY'] = SCR + 132
         a = A(BASE)
         a.shll8 = lambda n, a=a: a.w(0x4018 | R[n] << 8)
@@ -227,9 +181,11 @@ def build():
             break
         code_len = len(code)
     blob = bytearray(code) + bytes((-len(code)) % 4)
+    assert BASE + len(blob) == EXPD['EXP']
+    blob += kfont.expand_table()
     assert BASE + len(blob) == EXPD['SCR']
     blob += bytes(128 + 4)
-    sym = {'pcmExtra': a.labels['pcmExtra'], 'copyWrap': a.labels['copyWrap'], 'remap': a.labels['remap'], 'expand1': a.labels['expand1'],
+    sym = {'pcmExtra': a.labels['pcmExtra'], 'copyWrap': a.labels['copyWrap'], 'remap': a.labels['remap'],
            'GB': EXPD['GB'], 'GLY': EXPD['GLY'], 'GLY_MAX': RAM_END - EXPD['GLY'], 'end': BASE + len(blob)}
     return bytes(blob), sym
 

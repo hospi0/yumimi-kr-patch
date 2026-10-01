@@ -82,7 +82,7 @@ class Enc:
             i = len(self.glyphs)
             if i >= 64 * 200:
                 raise Err('장면 음절 너무 많음')
-            self.glyphs.append(kfont.pack1(kfont.cell(ch)))
+            self.glyphs.append(kfont.pack2(kfont.cell(ch)))    # 2bpp(표 조회로 빠르게 펼침)
             self.gid[ch] = i
         i = self.gid[ch]
         return bytes([0xA0 + i // 200, 1 + i % 200])
