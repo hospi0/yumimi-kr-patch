@@ -10,7 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 VER = 'v0.9'
 XDELTA = r'C:\claude\utils\xdelta.exe'
 ROMNAME = 'Yumimi Mix Remix (Japan)'
-SRC = os.path.join(r'C:\claude\roms\ss', ROMNAME, ROMNAME + ' (Track 1).bin')
+SRC = os.path.join(r'C:\claude\roms\ss\완료', ROMNAME, ROMNAME + ' (Track 1).bin')   # 사용자가 완료 폴더로 옮김
 OUT = os.path.join(ROOT, 'work', 'out', ROMNAME + ' (Track 1).bin')
 NAME = 'YumimiMixRemix_KR_' + VER
 TITLE = '유미미 믹스 리믹스 (세가 새턴 일본판) 한글 패치 ' + VER
