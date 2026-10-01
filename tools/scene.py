@@ -290,7 +290,9 @@ def rebuild_body(body, newsubs):
             old = Sub().parse(body, st)
             main = bytearray(newsubs[i].sub1() + newsubs[i].script)   # 선택지 창 폭 등 스크립트 수정 반영
             main += bytes((-len(main)) % 4)
-            if pcms:
+            if len(main) <= pend - st:
+                main += bytes(pend - st - len(main))         # 원래 크기로 0 채움 → 뒤 음성 위치가 영문판과 같다(분할 읽기 장면 필수, 2026-10-01)
+            elif pcms:
                 main += bytes((-len(main)) % 0x800)
         else:
             main = bytearray(body[st:pend])

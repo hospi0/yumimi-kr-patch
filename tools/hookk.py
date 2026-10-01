@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
-r"""유미미 한글 자막 SH-2 코드 (2026-10-01, 2판) — 영문 패치 적용본 SATANIME.BIN 에 덧붙인다
-  ① copyWrap  — 적재 함수(0x0605DACC)의 memcpy 호출 리터럴 0x0605DB58 을 이것으로.
-       r4=dst(subtitleBlockData) r5=src(0x20200000) r6=블록 전체 크기.
-       블록 끝 8 B 가 [u32 복사 크기]['HANG'] 이면: 글리프(복사 크기 ‥ 끝−8)를 GLY 로 복사, GB=GLY, 문자열 부분만 subtitleBlockData 로.
-       ★1판은 글리프를 Low RAM(0x200000 영역)에서 바로 읽었는데, 큰 장면은 음성을 0x200000 에 다시 읽어 들여 글리프가 덮임
-         (2026-10-01 실기: C102 에서 글자 깨짐) → 높은 RAM 으로 복사.
+r"""유미미 한글 자막 SH-2 코드 (2026-10-01, 3판) — 영문 패치 적용본 SATANIME.BIN 에 덧붙인다
+  ① loadK     — 부팅 때 YUMISND.BIN 적재 함수(0x060124D4)의 «파일 읽기» 호출 리터럴 0x06012540(값 0x06019EF0)을 이것으로.
+       YUMISND.BIN 을 원래대로 읽은 뒤, 같은 함수로 BIB.TXT(★게임이 안 읽는 ISO 서지 파일 — 내용을 한글 글리프 전체로 바꿈)를
+       높은 RAM KBASE(0x060F0000, 아무도 안 쓰는 곳 — 장면 상태 5개 모두 0)로 읽는다. 글리프 = 게임 전체 음절 하나씩(2bpp 56 B).
+       ★2판은 장면마다 글리프를 SUBS 블록 뒤에 붙여 장면 파일 앞머리가 영문판보다 커졌고, 그 때문에 음성 분할 읽기 장면(30개)에서
+         섹터 보정(pcmExtra)·12 KB 덧붙임이 필요했음 → C104·C102 멈춤(2026-10-01 실기 4회). 3판은 장면 파일 배치를 영문판과 똑같이 둔다
+         (분할 장면은 SUBS 크기도 영문과 같게 0 으로 채움) — 영문 패치의 적재 코드는 손대지 않음.
   ② remap     — assignRenderBufString 의 wordWrapString 호출 리터럴 0x06068AA4 를 이것으로.
        준비 버퍼를 제자리에서 2바이트 음절(A0+i/200, 1+i%200) → 1바이트 캐시 코드로. 새 칸마다 글리프(2bpp 56 B)를
        표 조회로 4bpp 로 펼쳐(2bpp: 0 투명·1 테두리·2 그림자·3→F) VDP1 글꼴 칸과 RAM 글꼴 원본 둘 다에 쓴다.
        캐시 칸: 아래 자리 0x51‥0x7E(46) · 위 자리 0x7F‥0x9B(29). 넘치면 마지막 칸 재사용(빌더가 막음). MACL 보존.
-  ③ 음성 분할 읽기 섹터 수(0x0601AD6A «ADD #1,R5» → «ADD #7,R5»): 엔진은 색인 오프셋으로 섹터를 세는데 실제 데이터는
-       SUBS 블록 크기만큼 뒤에 있어 꼬리가 덜 읽힌다(영문은 블록 < 0x800 이라 괜찮았음) → 6섹터(12 KB) 더 읽음. 블록 ≤ 0x3000.
+  음절 코드 = 게임 전체 번호 i → 2바이트 A0+i/200, 1+i%200 (영문 글꼴 표는 0xA0‥0xDF 를 안 씀 — 영문 문자열은 remap 을 그냥 지나감).
 """
 import os, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,19 +21,21 @@ import sh2asm, kfont
 LOAD = 0x06012000
 BASE = 0x06069398                   # 영문 SATANIME.BIN 끝
 RAM_END = 0x0606C000
-LIT_MEMCPY = 0x0605DB58             # 값 0x0601EA74
+LIT_LOADSND = 0x06012540            # 값 0x06019EF0 (YUMISND.BIN 읽기 — 0x060124E8 에서만 씀)
+LOADFILE = 0x06019EF0               # (r4=이름 버퍼, r5=목적지) 파일 통째 읽기
+STRCPY = 0x0601EDB4                 # (r4=dst, r5=src)
+NAMEBUF = 0x06032DDC
+KBASE = 0x060F0000                  # 한글 글리프 전체(부팅 때 한 번)
+KEND = 0x060FD000                   # 스택(0x06100000 아래, 상태 5개 관측 최저 0x060FF400 이상) 여유 12 KB
+KFILE = 'BIB.TXT'
 LIT_WW = 0x06068AA4                 # 값 0x06068ADE (wordWrapString)
-MEMCPY = 0x0601EA74
 WORDWRAP = 0x06068ADE
 BUF_A = 0x06068860                  # subStringBufA (아래 자리)
 FONT_RAM = 0x0605883C               # fontBitmap
 FONT_VRAM = 0x25C1A800              # 비캐시 VDP1 0x1A800
 WIDTH = 0x0606203C                  # 폭 표 160 B
 KERN = 0x060620DC                   # 커닝 160×160
-PCM_CNT = 0x0601AD6A                # ADD #1,R5 (7501)
-PCM_EXTRA = 6                       # 블록 최대 = 6섹터(장면마다 실제로 더 읽는 수는 pcmExtra 가 ceil(크기/0x800))
-LIT_RET = 0x0605DB8C                # 영문 적재 함수의 «0x0601256C 로 복귀» 리터럴
-BLOCK_MAX = PCM_EXTRA * 0x800
+KMAX = (KEND - KBASE - 0x1000) // 56    # 음절 최대 877 — 읽기 함수가 «섹터 수+1» 을 읽으므로 섹터 반올림+1섹터(0x1000) 여유
 POOL_A = (0x51, 46)
 POOL_B = (0x7F, 29)
 CACHE = range(0x51, 0x9C)
@@ -71,50 +73,25 @@ class A(sh2asm.Asm):
 
 
 def emit(a, EXPD):
-    GB, SCR, GLY = EXPD['GB'], EXPD['SCR'], EXPD['GLY']
-    a.defl('MEMCPY', MEMCPY); a.defl('WW', WORDWRAP); a.defl('HANG', 0x48414E47)
-    a.defl('GB', GB); a.defl('SCR', SCR); a.defl('GLY', GLY); a.defl('BUFA', BUF_A); a.defl('EXP', EXPD['EXP'])
+    a.defl('WW', WORDWRAP); a.defl('KB', KBASE); a.defl('SCR', EXPD['SCR']); a.defl('BUFA', BUF_A); a.defl('EXP', EXPD['EXP'])
     a.defl('VRAM', FONT_VRAM); a.defl('FONT', FONT_RAM); a.defw('K200', 200)
+    a.defl('LOADF', LOADFILE); a.defl('STRCPY', STRCPY); a.defl('NBUF', NAMEBUF); a.defl('KNAME', EXPD['KNAME'])
 
-    # ---- ⓪ pcmExtra — 영문 적재 함수 끝의 «0x0601256C 로 복귀» 리터럴(0x0605DB8C)을 이것으로.
-    #   r11 = 0x00200004 + SUBS 크기(영문 코드가 방금 맞춰 둔 값) → 음성 분할 읽기 섹터 수 «ADD #imm,R5»(0x0601AD6A)의
-    #   imm 을 1 + ceil(SUBS 크기/0x800) 로 고쳐 쓴다(자기 수정 코드 — SH-2 캐시는 명령·데이터 공용이라 같은 CPU 에서 일관).
-    #   ★2026-10-01 실기: 모든 장면에 +6 을 고정했더니 C104 에서 소리 대기(0x0601B1A4)로 멈춤 → 장면마다 꼭 필요한 만큼만.
-    a.defl('B200004', 0x00200004); a.defl('ADDIMM', PCM_CNT + 1); a.defl('RET256C', 0x0601256C); a.defl('K7FF', 0x7FF)
-    a.label('pcmExtra')
-    a.mov('r11', 'r1'); a.movl_pc('B200004', 'r2'); a.sub('r2', 'r1')      # r1 = SUBS 크기(없으면 0)
-    a.movl_pc('K7FF', 'r0'); a.add('r1', 'r0')
-    a.shlr8('r0'); a.shlr2('r0'); a.shlr('r0')                             # ceil(크기/0x800)
-    a.addi(1, 'r0')
-    a.movl_pc('ADDIMM', 'r1'); a.movb_store('r0', 'r1')
-    a.movl_pc('RET256C', 'r0'); a.jmp('r0'); a.nop()
-
-    # ---- ① copyWrap
-    a.label('copyWrap')
-    a.mov('r5', 'r1'); a.add('r6', 'r1'); a.addi(-8, 'r1')
-    a.movl_disp(4, 'r1', 'r0')
-    a.movl_pc('HANG', 'r2'); a.cmpeq('r0', 'r2'); a.bt('cw_yes')
-    a.movi(0, 'r0'); a.movl_pc('GB', 'r2'); a.movl_store('r0', 'r2')
-    a.movl_pc('MEMCPY', 'r0'); a.jmp('r0'); a.nop()
-    a.label('cw_yes')
-    a.stspr_predec('r15'); a.push('r4'); a.push('r5'); a.push('r1')
-    a.movl_load('r1', 'r2')                          # r2 = 복사 크기
-    a.mov('r1', 'r6'); a.sub('r5', 'r6'); a.sub('r2', 'r6')   # r6 = 글리프 바이트 = (끝−8) − src − 복사
-    a.add('r2', 'r5')                                # r5 = src + 복사
-    a.movl_pc('GLY', 'r4')
-    a.movl_pc('MEMCPY', 'r0'); a.jsr('r0'); a.nop()
-    a.movl_pc('GLY', 'r0'); a.movl_pc('GB', 'r2'); a.movl_store('r0', 'r2')
-    a.pop('r1'); a.pop('r5'); a.pop('r4'); a.ldspr_postinc('r15')
-    a.movl_load('r1', 'r6')                          # 문자열 부분만
-    a.movl_pc('MEMCPY', 'r0'); a.jmp('r0'); a.nop()
+    # ---- ① loadK — r4=이름 버퍼(«YUMISND.BIN» 이미 복사됨) r5=0x06082000. 반환 r0 = YUMISND 결과(호출자가 오류 검사)
+    a.label('loadK')
+    a.stspr_predec('r15')
+    a.movl_pc('LOADF', 'r0'); a.jsr('r0'); a.nop()
+    a.push('r0')
+    a.movl_pc('NBUF', 'r4'); a.movl_pc('KNAME', 'r5'); a.movl_pc('STRCPY', 'r0'); a.jsr('r0'); a.nop()
+    a.movl_pc('NBUF', 'r4'); a.movl_pc('KB', 'r5'); a.movl_pc('LOADF', 'r0'); a.jsr('r0'); a.nop()
+    a.pop('r0'); a.ldspr_postinc('r15'); a.rts(); a.nop()
 
     # ---- ② remap
     a.label('remap')
     a.stspr_predec('r15'); a.stsmacl_push()
     for r in ('r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r4', 'r5', 'r6'):
         a.push(r)
-    a.movl_pc('GB', 'r0'); a.movl_load('r0', 'r13')
-    a.tst('r13', 'r13'); a.bt('rm_done')
+    a.movl_pc('KB', 'r13')
     a.movl_pc('BUFA', 'r0'); a.cmpeq('r5', 'r0'); a.bt('rm_a')
     a.movi(POOL_B[0], 'r12'); a.movi(POOL_B[1], 'r11'); a.bra('rm_go'); a.nop()
     a.label('rm_a')
@@ -138,7 +115,7 @@ def emit(a, EXPD):
     a.cmphs('r11', 'r10'); a.bt('rm_full')
     a.mov('r10', 'r0'); a.shll('r0'); a.movw_r0n_store('r2', 'r3')
     a.mov('r10', 'r1'); a.addi(1, 'r10')
-    # 글리프: src = GB + r2×56(2bpp) · off = (r12+r1)×0x70 — 표(512 B)로 바이트마다 4bpp 2바이트
+    # 글리프: src = KBASE + r2×56(2bpp) · off = (r12+r1)×0x70 — 표(512 B)로 바이트마다 4bpp 2바이트
     #   ★1bpp + 실행 중 테두리 계산(expand1)은 수직귀선 인터럽트 안에서 너무 오래 걸려 소리 처리를 놓침(C104 멈춤 3회, 2026-10-01)
     a.movi(56, 'r0'); a.muluw('r0', 'r2'); a.sts_macl('r4'); a.add('r13', 'r4')
     a.mov('r12', 'r0'); a.add('r1', 'r0'); a.movi(0x70, 'r5'); a.muluw('r5', 'r0'); a.sts_macl('r5')
@@ -172,7 +149,7 @@ def build():
         EXPD = {}
         SCR = BASE + ((code_len + 3) & ~3)
         EXPD['EXP'] = SCR; SCR += 512
-        EXPD['SCR'] = SCR; EXPD['GB'] = SCR + 128; EXPD['GLY'] = SCR + 132
+        EXPD['SCR'] = SCR; EXPD['KNAME'] = SCR + 128
         a = A(BASE)
         a.shll8 = lambda n, a=a: a.w(0x4018 | R[n] << 8)
         emit(a, EXPD)
@@ -184,9 +161,10 @@ def build():
     assert BASE + len(blob) == EXPD['EXP']
     blob += kfont.expand_table()
     assert BASE + len(blob) == EXPD['SCR']
-    blob += bytes(128 + 4)
-    sym = {'pcmExtra': a.labels['pcmExtra'], 'copyWrap': a.labels['copyWrap'], 'remap': a.labels['remap'],
-           'GB': EXPD['GB'], 'GLY': EXPD['GLY'], 'GLY_MAX': RAM_END - EXPD['GLY'], 'end': BASE + len(blob)}
+    blob += bytes(128)
+    blob += (KFILE.encode() + b'\0').ljust(16, b'\0')
+    sym = {'loadK': a.labels['loadK'], 'remap': a.labels['remap'], 'end': BASE + len(blob)}
+    assert sym['end'] <= RAM_END
     return bytes(blob), sym
 
 
@@ -194,14 +172,12 @@ def patch_exe(exe):
     exe = bytearray(exe)
     assert LOAD + len(exe) == BASE, hex(LOAD + len(exe))
     u32 = lambda a: struct.unpack_from('>I', exe, a - LOAD)[0]
-    assert u32(LIT_MEMCPY) == MEMCPY and u32(LIT_WW) == WORDWRAP
-    assert exe[PCM_CNT - LOAD:PCM_CNT - LOAD + 2] == b'\x75\x01'
+    assert u32(LIT_LOADSND) == LOADFILE and u32(LIT_WW) == WORDWRAP
+    assert u32(0x0601252C) == 0x0601F368 and u32(0x0601253C) == 0x06082000     # «YUMISND.BIN» · 0x06082000
     blob, sym = build()
     exe += blob
-    struct.pack_into('>I', exe, LIT_MEMCPY - LOAD, sym['copyWrap'])
+    struct.pack_into('>I', exe, LIT_LOADSND - LOAD, sym['loadK'])
     struct.pack_into('>I', exe, LIT_WW - LOAD, sym['remap'])
-    assert u32(LIT_RET) == 0x0601256C
-    struct.pack_into('>I', exe, LIT_RET - LOAD, sym['pcmExtra'])    # 섹터 수는 장면마다 pcmExtra 가 실행 중에 고침
     for c in CACHE:
         exe[WIDTH - LOAD + c] = kfont.ADV
         for q in range(160):
@@ -216,5 +192,5 @@ if __name__ == '__main__':
     import sh2dis
     blob, sym = build()
     print({k: hex(v) for k, v in sym.items()}, len(blob))
-    g = open(sh2dis.EXE, 'rb').read() + blob
-    print('\n'.join(sh2dis.dis(sym['expand1'], 110, g)))
+    g = open(os.path.join(os.path.dirname(HERE), 'work', 'disc', 'SATANIME_en.BIN'), 'rb').read() + blob
+    print('\n'.join(sh2dis.dis(sym['loadK'], 40, g)))

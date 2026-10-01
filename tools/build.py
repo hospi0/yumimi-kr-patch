@@ -4,12 +4,13 @@ r"""유미미 믹스 리믹스 한글 빌드 (2026-10-01) — 영문 패치 적�
      ids.tsv 로 칸 ID(scene:C101C2.DAT-ss0-4) 를 찾고, 영어 칸 조각 순서대로 «<» 든 조각 = 가사 행, 나머지 = 대사/노래 행.
      번역 없는 칸·조각은 영문 그대로.
   ② 장면마다: SUBS 블록 스크립트의 문자열만 교체(명령 바이트 그대로) — tools/subs.py 가 1:1 검증.
-     한국어 음절(글꼴 표에 없는 글자 전부)은 장면별 번호 i → 2바이트 A0+i/200, 1+i%200, 글리프(1bpp 28 B, 실행 중 테두리·그림자 생성)는 블록 뒤 → 적재 때 높은 RAM(GLY)으로 복사.
-     블록 = 'SUBS'·전체 크기·소리 수·색인(+12 기준)·스크립트… (4 정렬 = 복사 크기) + 글리프 + (4 정렬) + [복사 크기]['HANG']
-  ③ SATANIME.BIN: tools/hookk.py (copyWrap·remap·폭·커닝) + tools/gfx.py 그림(일시정지·인터페이스·장면 그림·퍼즐)
+     한국어 음절(글꼴 표에 없는 글자 전부)은 게임 전체 번호 i → 2바이트 A0+i/200, 1+i%200, 글리프(2bpp 56 B)는 전부 BIB.TXT 하나 →
+     부팅 때 높은 RAM 0x060F0000 으로(hookk.loadK). ★3판(2026-10-01): 장면 파일엔 글리프 없음 — SUBS 블록은 영문 크기로 0 채움(장면 배치 = 영문판).
+     블록 = 'SUBS'·전체 크기·소리 수·색인(+12 기준)·스크립트… (4 정렬, 영문 크기 이하면 0 채움)
+  ③ SATANIME.BIN: tools/hookk.py (loadK·remap·폭·커닝) + tools/gfx.py 그림(일시정지·인터페이스·장면 그림·퍼즐)
   ④ 트랙 1 전체 재배치(tools/iso.py) → work/out/Yumimi Mix Remix (Japan) (Track 1).bin
-  ⛔쓰는 순간 막음: 블록 ≤0x3000 · 장면 글리프 ≤ GLY 버퍼 · 조각 수 · 문자열 0xBF B 초과 · 자리별 음절 칸 초과(아래 46 / 위 29) · 복사 크기 0x2000 초과 · 갈무리에 없는 글자
-  ⚠경고: 원래 적재 창(0xF8000) 안이던 장면이 창을 넘음
+  ⛔쓰는 순간 막음: 음성 분할 장면 SUBS ≤ 영문 크기·파일 크기 영문과 같음 · 전체 음절 ≤ hookk.KMAX · 조각 수 · 문자열 0xBF B 초과 · 자리별 음절 칸 초과(아래 46 / 위 29) · 복사 크기 0x2000 초과 · 갈무리에 없는 글자
+  · 원래 적재 창(0xF8000) 안이던 장면이 창을 넘으면 오류
   python tools/build.py [--write]
 """
 import csv, glob, os, struct, sys
@@ -23,7 +24,6 @@ N_TRACK1 = 134992                   # 영문 적용본 트랙 1 섹터 수
 OUT = os.path.join(ROOT, 'work', 'out', 'Yumimi Mix Remix (Japan) (Track 1).bin')
 WINDOW = 0xF8000
 POOL = {0: hookk.POOL_A[1], 1: hookk.POOL_B[1]}
-GLY_MAX = hookk.build()[1]['GLY_MAX']
 NORM = {'…': '...', '！': '!', '？': '?', '、': ',', '，': ',', '。': '.', '．': '.', '：': ':', '；': ';', '（': '(', '）': ')',
         '　': ' ', '―': '―', '－': '-', '〜': '~', '～': '~', '─': '―', '━': '―', 'ー': '―'}
 NORM.update({chr(c): chr(c - 0xFEE0) for c in range(0xFF01, 0xFF5F) if chr(c) not in NORM})   # 전각 영숫자·부호 → 반각(영문 글꼴로)
@@ -72,7 +72,7 @@ def cell_pieces(tr):
 
 
 class Enc:
-    """장면 하나의 인코더 — 음절 번호·글리프"""
+    """게임 전체 인코더 — 음절 번호(전체 공용)·글리프 → BIB.TXT"""
     def __init__(self, table):
         self.table = table; self.keys = sorted(table, key=len, reverse=True)
         self.gid = {}; self.glyphs = []
@@ -80,8 +80,8 @@ class Enc:
     def glyph_code(self, ch):
         if ch not in self.gid:
             i = len(self.glyphs)
-            if i >= 64 * 200:
-                raise Err('장면 음절 너무 많음')
+            if i >= hookk.KMAX:
+                raise Err('한글 음절 %d개 넘음(높은 RAM KBASE‥KEND)' % hookk.KMAX)
             self.glyphs.append(kfont.pack2(kfont.cell(ch)))    # 2bpp(표 조회로 빠르게 펼침)
             self.gid[ch] = i
         i = self.gid[ch]
@@ -115,9 +115,8 @@ def script_slot_strings(b, off, slot0):
     return toks, out
 
 
-def build_scene(name, b, ids, cells, pieces, table, errs, stat):
+def build_scene(name, b, ids, cells, pieces, enc, errs, stat):
     size, nsnd, offs = subs.parse_block(b)
-    enc = Enc(table)
     newscripts = []; changed = False
     for k, off in enumerate(offs):
         if not off:
@@ -168,23 +167,17 @@ def build_scene(name, b, ids, cells, pieces, table, errs, stat):
             idx += struct.pack('>I', base + len(body)); body += s
     blk = bytearray(b'SUBS' + bytes(4) + struct.pack('>I', nsnd)) + idx + body
     blk += bytes((-len(blk)) % 4)
-    copy = len(blk)
-    if copy > 0x2000:
-        errs.append('%s 복사 크기 0x%X > 0x2000' % (name, copy))
-    for g in enc.glyphs:
-        blk += g
-    blk += bytes((-len(blk)) % 4 or 4)          # 글리프 부분 최소 4 B(copyWrap 의 memcpy 크기 0 방지)
-    gbytes = len(blk) - copy
-    if gbytes > GLY_MAX:
-        errs.append('%s 글리프 %d개 = %d B > %d B(높은 RAM 버퍼)' % (name, len(enc.glyphs), gbytes, GLY_MAX))
-    blk += struct.pack('>I', copy) + b'HANG'
-    if len(blk) & 0xFFFF == 0:              # subtitleBlockExists 는 크기 하위 16비트(0이면 «없음»)
-        blk[-8:-8] = bytes(4)
+    # ★3판: 글리프는 장면에 안 붙인다(전체 공용 BIB.TXT). 블록은 영문 크기 이하면 0 으로 채워 «영문과 같은 크기» —
+    #   장면 파일 배치가 영문판과 바이트 단위로 같아진다. 음성 분할 읽기 장면(창 0xF8000 초과)은 반드시 같아야 함(영문 적재 코드 그대로 쓰므로).
+    if len(blk) <= size:
+        blk += bytes(size - len(blk))
+    elif len(b) > WINDOW:
+        errs.append('%s 음성 분할 장면인데 SUBS 0x%X > 영문 0x%X' % (name, len(blk), size))
+    if len(blk) > 0x2000:
+        errs.append('%s 복사 크기 0x%X > 0x2000' % (name, len(blk)))
     struct.pack_into('>I', blk, 4, len(blk))
-    if len(blk) > hookk.BLOCK_MAX:
-        errs.append('%s SUBS 블록 0x%X > 0x%X(음성 분할 읽기 여분 섹터)' % (name, len(blk), hookk.BLOCK_MAX))
     new = bytes(blk) + b[size:]
-    stat['scene'] += 1; stat['glyph'] += len(enc.glyphs)
+    stat['scene'] += 1
     if len(b) <= WINDOW < len(new):
         stat['warn'].append('%s 적재 창 0xF8000 을 넘음(0x%X → 0x%X)' % (name, len(b), len(new)))
     return new
@@ -200,7 +193,8 @@ def main():
     print('번역 행 %d · 번역 든 칸 %d' % (len(tr), len(pieces)))
     D = disc.Disc(EN_BIN)
     fmap = {nm.lstrip('/'): (l, s) for nm, l, s in D.files()}
-    repl = {}; stat = {'scene': 0, 'glyph': 0, 'str': 0, 'warn': []}
+    repl = {}; stat = {'scene': 0, 'str': 0, 'warn': []}
+    enc = Enc(table)
     for name, (nsnd, ids) in sorted(reg.items()):
         if name not in fmap or not any(i in pieces for i in ids if i):
             continue
@@ -208,7 +202,7 @@ def main():
         b = D.sec(l, (s + 2047) // 2048)[:s]
         if b[:4] != b'SUBS':
             continue
-        new = build_scene(name, b, ids, cells, pieces, table, errs, stat)
+        new = build_scene(name, b, ids, cells, pieces, enc, errs, stat)
         if new:
             repl['/' + name] = new
     exe, sym = hookk.patch_exe(D.read('/SATANIME.BIN'))
@@ -219,14 +213,19 @@ def main():
     for e in cerr:
         (stat['warn'] if e.startswith('⚠') else errs).append(e.lstrip('⚠ '))
     repl['/MINISND.ABK'] = gfx.patch_minisnd(D.read('/MINISND.ABK'))   # 퍼즐 끝·예고
-    # ★음성 분할 읽기는 장면마다 ceil(SUBS/0x800) 섹터 더 읽으므로(hookk.pcmExtra, 최대 PCM_EXTRA) 모든 장면 파일 끝에 그만큼 0 을 붙인다 —
-    #   안 붙이면 마지막 음성을 읽을 때 파일 끝 너머를 읽으려다 멈춤(2026-10-01 실기: C104 소리 대기 0x0601B1A4 에서 정지)
-    pad = bytes(hookk.PCM_EXTRA * 0x800)
-    for nm, l, s in D.files():
-        if nm.endswith(('.DAT', '.CUT')):
-            repl[nm] = (repl[nm] if nm in repl else D.read(nm)) + pad
-    print('장면 %d · 문자열 %d · 글리프 %d · SATANIME +%d B (copyWrap %X · remap %X)'
-          % (stat['scene'], stat['str'], stat['glyph'], len(exe) - (hookk.BASE - hookk.LOAD), sym['copyWrap'], sym['remap']))
+    # 한글 글리프 전체 → BIB.TXT(게임이 안 읽는 ISO 서지 파일) — 부팅 때 hookk.loadK 가 KBASE 로 읽음
+    repl['/BIB.TXT'] = b''.join(enc.glyphs) or bytes(4)
+    # ⚠ 2판의 «모든 장면 파일 끝 12 KB 덧붙임»은 없앴다(장면 배치 = 영문판).
+    for nm in repl:
+        if not nm.endswith(('.DAT', '.CUT')):
+            continue
+        old = D.read(nm)
+        if len(old) > WINDOW and len(repl[nm]) != len(old):
+            errs.append('%s 음성 분할 장면 크기가 영문판과 다름(0x%X → 0x%X)' % (nm, len(old), len(repl[nm])))
+        elif len(old) <= WINDOW < len(repl[nm]):
+            errs.append('%s 적재 창 0xF8000 을 넘음(0x%X → 0x%X)' % (nm, len(old), len(repl[nm])))
+    print('장면 %d · 문자열 %d · 글리프 %d(%d B / 한도 %d) · SATANIME +%d B (loadK %X · remap %X)'
+          % (stat['scene'], stat['str'], len(enc.glyphs), len(repl['/BIB.TXT']), hookk.KMAX, len(exe) - (hookk.BASE - hookk.LOAD), sym['loadK'], sym['remap']))
     for w in stat['warn']:
         print('⚠️', w)
     if errs:
